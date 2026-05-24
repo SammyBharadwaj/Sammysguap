@@ -124,11 +124,11 @@ function EditableBudgetInput({
   return (
     <button
       onClick={handleStartEdit}
-      className="group flex items-center gap-1.5 rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="group flex items-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-foreground transition-all hover:border-foreground/20 hover:bg-muted"
     >
       <span className="font-mono tabular-nums">{formatCurrency(value)}</span>
       <svg 
-        className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" 
+        className="h-3.5 w-3.5 text-muted-foreground transition-colors group-hover:text-foreground" 
         fill="none" 
         viewBox="0 0 24 24" 
         stroke="currentColor" 
