@@ -1,17 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import {
-  CartesianGrid,
-  Line,
-  LineChart,
+  Area,
+  AreaChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  ReferenceDot,
 } from "recharts";
 
-import { ChartTooltip } from "@/components/dashboard/chart-tooltip";
 import {
   accountLines,
   chartTimeframes,
@@ -38,8 +37,15 @@ function sliceByTimeframe(
   return data.slice(-slices[timeframe]);
 }
 
+type HoverData = {
+  value: number;
+  label: string;
+  index: number;
+} | null;
+
 export function NetWorthHero() {
-  const [timeframe, setTimeframe] = useState<ChartTimeframe>("3M");
+  const [timeframe, setTimeframe] = useState<ChartTimeframe>("ALL");
+  const [hoverData, setHoverData] = useState<HoverData>(null);
   const [visible, setVisible] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
       accountLines.map((a) => [
@@ -55,10 +61,35 @@ export function NetWorthHero() {
   );
 
   const isPositive = netWorthSnapshot.changeAmount >= 0;
+  const chartColor = isPositive ? "#00D632" : "#FF5252";
+
+  const displayValue = hoverData?.value ?? netWorthSnapshot.total;
+  const displayLabel = hoverData?.label ?? null;
+
+  const handleMouseMove = useCallback((data: { activePayload?: Array<{ payload: NetWorthHistoryPoint }>; activeTooltipIndex?: number }) => {
+    if (data.activePayload && data.activePayload.length > 0 && data.activeTooltipIndex !== undefined) {
+      const point = data.activePayload[0].payload;
+      setHoverData({
+        value: point.netWorth,
+        label: point.label,
+        index: data.activeTooltipIndex,
+      });
+    }
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setHoverData(null);
+  }, []);
 
   const toggleLine = (key: string) => {
     setVisible((prev) => ({ ...prev, [key]: !prev[key] }));
   };
+
+  // Find min and max for better Y axis domain
+  const netWorthValues = chartData.map(d => d.netWorth);
+  const minValue = Math.min(...netWorthValues);
+  const maxValue = Math.max(...netWorthValues);
+  const padding = (maxValue - minValue) * 0.1;
 
   return (
     <section className="border-b border-foreground/10 pb-6 sm:pb-8">
@@ -72,34 +103,57 @@ export function NetWorthHero() {
         </p>
       </div>
 
+      {/* Robinhood-style value display */}
       <div className="mb-1">
-        <p className="font-mono text-[1.75rem] font-medium leading-tight tabular-nums tracking-tight sm:text-5xl">
-          {formatCurrency(netWorthSnapshot.total)}
+        <p className="font-mono text-[1.75rem] font-semibold leading-tight tabular-nums tracking-tight sm:text-5xl">
+          {formatCurrency(displayValue)}
         </p>
-        <p
-          className={cn(
-            "mt-1.5 text-sm font-medium tabular-nums sm:text-base",
-            isPositive ? "text-positive" : "text-negative",
+        <div className="mt-1.5 flex items-center gap-2">
+          {displayLabel ? (
+            <span className="text-sm text-muted-foreground">{displayLabel}</span>
+          ) : (
+            <>
+              <span
+                className={cn(
+                  "flex items-center gap-1 text-sm font-medium tabular-nums",
+                  isPositive ? "text-positive" : "text-negative",
+                )}
+              >
+                {isPositive ? (
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7 14l5-5 5 5H7z" />
+                  </svg>
+                ) : (
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7 10l5 5 5-5H7z" />
+                  </svg>
+                )}
+                {formatCurrency(Math.abs(netWorthSnapshot.changeAmount))} ({formatPercent(netWorthSnapshot.changePercent)})
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {netWorthSnapshot.periodLabel}
+              </span>
+            </>
           )}
-        >
-          <span className="block sm:inline">
-            {isPositive ? "+" : ""}
-            {formatCurrency(netWorthSnapshot.changeAmount)} (
-            {formatPercent(netWorthSnapshot.changePercent)})
-          </span>
-          <span className="mt-0.5 block text-muted-foreground sm:mt-0 sm:inline sm:before:content-['_']">
-            {netWorthSnapshot.periodLabel}
-          </span>
-        </p>
+        </div>
       </div>
 
-      <div className="mt-5 h-[200px] w-full min-w-0 sm:mt-6 sm:h-[260px]">
+      {/* Robinhood-style chart */}
+      <div className="relative mt-5 h-[200px] w-full min-w-0 sm:mt-6 sm:h-[280px]">
         <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-          <LineChart
+          <AreaChart
             data={chartData}
-            margin={{ top: 8, right: 8, left: -8, bottom: 0 }}
+            margin={{ top: 20, right: 8, left: 8, bottom: 0 }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
           >
-            <CartesianGrid stroke={chartColors.grid} vertical={false} />
+            <defs>
+              <linearGradient id="netWorthGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={chartColor} stopOpacity={0.3} />
+                <stop offset="50%" stopColor={chartColor} stopOpacity={0.1} />
+                <stop offset="100%" stopColor={chartColor} stopOpacity={0} />
+              </linearGradient>
+            </defs>
             <XAxis
               dataKey="label"
               axisLine={false}
@@ -109,35 +163,74 @@ export function NetWorthHero() {
               interval="preserveStartEnd"
             />
             <YAxis
+              domain={[minValue - padding, maxValue + padding]}
               axisLine={false}
               tickLine={false}
-              tick={{ fill: chartColors.axis, fontSize: 10 }}
-              tickFormatter={(v) => `$${(Number(v) / 1000).toFixed(0)}k`}
-              width={36}
+              tick={false}
+              width={0}
             />
             <Tooltip
-              content={<ChartTooltip />}
-              cursor={{ stroke: chartColors.grid, strokeWidth: 1 }}
+              content={() => null}
+              cursor={{
+                stroke: chartColor,
+                strokeWidth: 1,
+                strokeDasharray: "4 4",
+              }}
             />
-            {accountLines.map((account) =>
-              visible[account.key] ? (
-                <Line
-                  key={account.key}
-                  type="monotone"
-                  dataKey={account.key}
-                  name={account.label}
-                  stroke={account.color}
-                  strokeWidth={account.key === "netWorth" ? 2.5 : 1.5}
-                  dot={false}
-                  activeDot={{ r: 5, strokeWidth: 0 }}
-                  strokeDasharray={account.key === "credit" ? "4 4" : undefined}
-                />
-              ) : null,
+            <Area
+              type="monotone"
+              dataKey="netWorth"
+              stroke={chartColor}
+              strokeWidth={2}
+              fill="url(#netWorthGradient)"
+              dot={false}
+              activeDot={{
+                r: 6,
+                fill: chartColor,
+                stroke: "hsl(var(--background))",
+                strokeWidth: 2,
+              }}
+            />
+            {/* Show reference dot with label when hovering */}
+            {hoverData && chartData[hoverData.index] && (
+              <ReferenceDot
+                x={chartData[hoverData.index].label}
+                y={chartData[hoverData.index].netWorth}
+                r={0}
+                label={{
+                  value: chartData[hoverData.index].label,
+                  position: "top",
+                  fill: "hsl(var(--foreground))",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  dy: -12,
+                }}
+              />
             )}
-          </LineChart>
+          </AreaChart>
         </ResponsiveContainer>
       </div>
 
+      {/* Robinhood-style time period selector */}
+      <div className="mt-4 flex items-center justify-center gap-1 rounded-lg bg-muted/50 p-1 sm:justify-start">
+        {chartTimeframes.map((tf) => (
+          <button
+            key={tf}
+            type="button"
+            onClick={() => setTimeframe(tf)}
+            className={cn(
+              "min-w-[44px] rounded-md px-3 py-1.5 text-xs font-semibold transition-all touch-manipulation",
+              timeframe === tf
+                ? "bg-foreground text-background shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {tf}
+          </button>
+        ))}
+      </div>
+
+      {/* Account toggles */}
       <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
         {accountLines.map((account) => (
           <button
@@ -156,24 +249,6 @@ export function NetWorthHero() {
               style={{ backgroundColor: account.color }}
             />
             {account.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-4 grid grid-cols-5 gap-1.5 sm:flex sm:gap-1">
-        {chartTimeframes.map((tf) => (
-          <button
-            key={tf}
-            type="button"
-            onClick={() => setTimeframe(tf)}
-            className={cn(
-              "min-h-10 rounded-lg px-1 py-2 text-xs font-medium transition-colors touch-manipulation sm:min-h-0 sm:rounded-md sm:px-2.5 sm:py-1",
-              timeframe === tf
-                ? "bg-foreground text-background"
-                : "bg-muted/60 text-muted-foreground active:bg-muted",
-            )}
-          >
-            {tf}
           </button>
         ))}
       </div>
